@@ -1,0 +1,316 @@
+from pathlib import Path
+
+html = r'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JARVIS Holographic Globe</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#02050b}
+body{font-family:Arial,Helvetica,sans-serif}
+#scene{position:fixed;inset:0}
+canvas{display:block;width:100%;height:100%}
+.hud{
+  position:fixed;inset:0;pointer-events:none;
+  background:
+    radial-gradient(circle at 50% 50%,transparent 0 31%,rgba(0,25,45,.10) 48%,rgba(0,0,0,.45) 100%),
+    linear-gradient(90deg,rgba(0,50,90,.08),transparent 25%,transparent 75%,rgba(0,50,90,.08));
+}
+.scan{
+  position:absolute;left:0;right:0;height:1px;top:-2px;
+  background:linear-gradient(90deg,transparent,rgba(255,174,40,.0),rgba(255,190,65,.75),rgba(255,174,40,0),transparent);
+  box-shadow:0 0 14px rgba(255,170,35,.55);
+  animation:scan 5s linear infinite;
+}
+@keyframes scan{to{top:100%}}
+.corner{position:absolute;width:90px;height:90px;opacity:.45}
+.tl{top:25px;left:25px;border-left:1px solid #ff9f24;border-top:1px solid #ff9f24}
+.tr{top:25px;right:25px;border-right:1px solid #ff9f24;border-top:1px solid #ff9f24}
+.bl{bottom:25px;left:25px;border-left:1px solid #ff9f24;border-bottom:1px solid #ff9f24}
+.br{bottom:25px;right:25px;border-right:1px solid #ff9f24;border-bottom:1px solid #ff9f24}
+.label{
+ position:absolute;left:32px;bottom:32px;color:rgba(255,174,55,.75);
+ letter-spacing:4px;font-size:10px;text-transform:uppercase;
+ text-shadow:0 0 8px rgba(255,150,20,.55)
+}
+.controls{
+ position:absolute;right:28px;bottom:28px;display:flex;gap:8px;pointer-events:auto
+}
+button{
+ background:rgba(4,14,24,.7);color:#ffad32;border:1px solid rgba(255,170,45,.45);
+ padding:8px 12px;border-radius:3px;cursor:pointer;font-size:11px;letter-spacing:1px
+}
+button:hover{background:rgba(255,150,30,.12);box-shadow:0 0 14px rgba(255,150,30,.18)}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div class="hud">
+  <div class="scan"></div>
+  <div class="corner tl"></div><div class="corner tr"></div>
+  <div class="corner bl"></div><div class="corner br"></div>
+  <div class="label">JARVIS // HOLOGRAPHIC CORE</div>
+  <div class="controls">
+    <button id="pause">PAUSE</button>
+    <button id="fs">FULLSCREEN</button>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x02050b, 0.018);
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, .1, 100);
+camera.position.set(0,0,7.2);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.35;
+document.getElementById("scene").appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;
+controls.enablePan=false;
+controls.enableZoom=true;
+controls.minDistance=5.2;
+controls.maxDistance=10;
+controls.autoRotate=false;
+
+// ---------- Glow sprite ----------
+function glowTexture(){
+  const c=document.createElement("canvas"); c.width=c.height=128;
+  const x=c.getContext("2d"), g=x.createRadialGradient(64,64,0,64,64,64);
+  g.addColorStop(0,"rgba(255,255,210,1)");
+  g.addColorStop(.08,"rgba(255,210,90,.95)");
+  g.addColorStop(.25,"rgba(255,150,25,.55)");
+  g.addColorStop(.6,"rgba(255,90,0,.10)");
+  g.addColorStop(1,"rgba(255,60,0,0)");
+  x.fillStyle=g;x.fillRect(0,0,128,128);
+  return new THREE.CanvasTexture(c);
+}
+const glow = glowTexture();
+
+// ---------- Globe particle shell ----------
+const N=17000, radius=2.05;
+const pos=new Float32Array(N*3);
+const col=new Float32Array(N*3);
+const size=new Float32Array(N);
+const golden=new THREE.Color(0xffa31f);
+const hot=new THREE.Color(0xffe09a);
+
+for(let i=0;i<N;i++){
+  // Fibonacci sphere with controlled noise
+  const y=1-(i/(N-1))*2;
+  const r=Math.sqrt(Math.max(0,1-y*y));
+  const phi=Math.PI*(3-Math.sqrt(5))*i;
+  const jitter=(Math.random()-.5)*.045;
+  const rr=radius+jitter;
+  pos[i*3]=Math.cos(phi)*r*rr;
+  pos[i*3+1]=y*rr;
+  pos[i*3+2]=Math.sin(phi)*r*rr;
+
+  const c=golden.clone().lerp(hot,Math.random()**4);
+  col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;
+  size[i]=.025+Math.random()*.055;
+}
+const globeGeo=new THREE.BufferGeometry();
+globeGeo.setAttribute("position",new THREE.BufferAttribute(pos,3));
+globeGeo.setAttribute("color",new THREE.BufferAttribute(col,3));
+globeGeo.setAttribute("aSize",new THREE.BufferAttribute(size,1));
+
+const particleMat=new THREE.ShaderMaterial({
+ transparent:true,depthWrite:false,vertexColors:true,
+ uniforms:{uPixelRatio:{value:Math.min(devicePixelRatio,2)}},
+ vertexShader:`
+ attribute float aSize;
+ varying vec3 vColor;
+ void main(){
+   vColor=color;
+   vec4 mv=modelViewMatrix*vec4(position,1.0);
+   gl_PointSize=aSize*220.0*uPixelRatio*(5.5/-mv.z);
+   gl_Position=projectionMatrix*mv;
+ }`,
+ fragmentShader:`
+ varying vec3 vColor;
+ void main(){
+   vec2 p=gl_PointCoord-.5;
+   float d=length(p);
+   float a=smoothstep(.5,0.02,d);
+   float core=smoothstep(.15,0.0,d);
+   gl_FragColor=vec4(vColor*(1.0+core*1.4),a*.9);
+ }`
+});
+const globe=new THREE.Points(globeGeo,particleMat);
+scene.add(globe);
+
+// ---------- Inner wire globe ----------
+const wire=new THREE.Mesh(
+ new THREE.SphereGeometry(radius*.985,32,20),
+ new THREE.MeshBasicMaterial({color:0x7b4a12,wireframe:true,transparent:true,opacity:.12})
+);
+globe.add(wire);
+
+// ---------- Rings ----------
+const rings=new THREE.Group();
+scene.add(rings);
+
+function ring(radiusY, tube=.008, opacity=.35, rot=new THREE.Euler()){
+ const geo=new THREE.TorusGeometry(radiusY,.006,6,180);
+ const mat=new THREE.MeshBasicMaterial({color:0xffa51f,transparent:true,opacity});
+ const m=new THREE.Mesh(geo,mat);m.rotation.copy(rot);rings.add(m);return m;
+}
+ring(2.22,.006,.38,new THREE.Euler(Math.PI/2,0,0));
+ring(2.35,.006,.18,new THREE.Euler(Math.PI/2,0,0));
+ring(2.48,.006,.12,new THREE.Euler(Math.PI/2,0,0));
+ring(2.15,.006,.22,new THREE.Euler(0,Math.PI/2,0));
+ring(2.38,.006,.14,new THREE.Euler(0,Math.PI/2,0));
+
+for(let i=0;i<8;i++){
+ const r=2.18+i*.045;
+ const m=ring(r,.006,.08,new THREE.Euler(
+   Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI));
+}
+
+// ---------- Data arcs / longitude trails ----------
+const trails=new THREE.Group(); scene.add(trails);
+
+function makeArc(){
+ const pts=[];
+ const lat=(Math.random()-.5)*1.7;
+ const start=Math.random()*Math.PI*2;
+ const length=.7+Math.random()*2.2;
+ const steps=80;
+ for(let i=0;i<=steps;i++){
+   const t=i/steps;
+   const a=start+length*t;
+   const rr=radius+.025+Math.sin(t*Math.PI)*.06;
+   const y=Math.sin(lat+Math.sin(t*Math.PI)*.12)*rr;
+   const q=Math.cos(lat+Math.sin(t*Math.PI)*.12);
+   pts.push(new THREE.Vector3(Math.cos(a)*q*rr,y,Math.sin(a)*q*rr));
+ }
+ const g=new THREE.BufferGeometry().setFromPoints(pts);
+ const m=new THREE.LineBasicMaterial({color:0xff9b18,transparent:true,opacity:.16+Math.random()*.28});
+ const l=new THREE.Line(g,m);trails.add(l);
+ return l;
+}
+for(let i=0;i<75;i++)makeArc();
+
+// ---------- Vertical scanning meridians ----------
+for(let i=0;i<18;i++){
+ const curve=new THREE.EllipseCurve(0,0,radius*1.02,radius*1.02,0,Math.PI*2,false,0);
+ const pts=curve.getPoints(160).map(p=>new THREE.Vector3(
+   p.x*Math.cos(i*Math.PI/18), p.y, p.x*Math.sin(i*Math.PI/18)
+ ));
+ const g=new THREE.BufferGeometry().setFromPoints(pts);
+ const l=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffa21e,transparent:true,opacity:.06}));
+ trails.add(l);
+}
+
+// ---------- Central core ----------
+const coreGroup=new THREE.Group();scene.add(coreGroup);
+const core=new THREE.Sprite(new THREE.SpriteMaterial({
+ map:glow,color:0xff9d18,transparent:true,opacity:.9,blending:THREE.AdditiveBlending,
+ depthWrite:false
+}));
+core.scale.set(.95,.95,.95);coreGroup.add(core);
+
+for(let i=0;i<3;i++){
+ const g=new THREE.RingGeometry(.28+i*.13,.30+i*.13,96);
+ const m=new THREE.MeshBasicMaterial({color:0xffb43b,transparent:true,opacity:.22-i*.045,side:THREE.DoubleSide,blending:THREE.AdditiveBlending});
+ const r=new THREE.Mesh(g,m);r.rotation.x=Math.PI/2;coreGroup.add(r);
+}
+
+// ---------- Flying particles ----------
+const P=2600, ppos=new Float32Array(P*3), ps=new Float32Array(P);
+for(let i=0;i<P;i++){
+ const a=Math.random()*Math.PI*2;
+ const rr=2.0+Math.pow(Math.random(),1.8)*2.2;
+ const z=(Math.random()-.5)*.9;
+ ppos[i*3]=Math.cos(a)*rr;
+ ppos[i*3+1]=Math.sin(a)*rr*.72+z;
+ ppos[i*3+2]=(Math.random()-.5)*1.8;
+ ps[i]=.015+Math.random()*.04;
+}
+const pg=new THREE.BufferGeometry();
+pg.setAttribute("position",new THREE.BufferAttribute(ppos,3));
+pg.setAttribute("aSize",new THREE.BufferAttribute(ps,1));
+const pm=new THREE.ShaderMaterial({
+transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+vertexShader:`attribute float aSize;void main(){vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=aSize*260.*(6./-mv.z);gl_Position=projectionMatrix*mv;}`,
+fragmentShader:`void main(){float d=length(gl_PointCoord-.5);float a=smoothstep(.5,0.,d);gl_FragColor=vec4(1.,.52,.06,a*.75);}`
+});
+scene.add(new THREE.Points(pg,pm));
+
+// ---------- Floor reflection-like grid ----------
+const grid=new THREE.GridHelper(18,36,0x12334a,0x0a1825);
+grid.position.y=-3.0;
+grid.material.transparent=true;grid.material.opacity=.25;
+scene.add(grid);
+
+// ---------- Animation ----------
+let paused=false, t=0;
+const clock=new THREE.Clock();
+
+function animate(){
+ requestAnimationFrame(animate);
+ if(!paused){
+   const dt=Math.min(clock.getDelta(),.04); t+=dt;
+   globe.rotation.y += dt*.105;
+   wire.rotation.y -= dt*.045;
+   trails.rotation.y += dt*.075;
+   rings.rotation.z += dt*.018;
+   rings.rotation.y -= dt*.012;
+   coreGroup.rotation.y += dt*.35;
+   coreGroup.rotation.z = Math.sin(t*.7)*.18;
+
+   // subtle pulsing glow
+   const s=.88+Math.sin(t*2.2)*.08;
+   core.scale.setScalar(s);
+
+   // orbital particle drift
+   const a=pg.geometry.attributes.position.array;
+   for(let i=0;i<P;i++){
+     const x=a[i*3], z=a[i*3+2];
+     const ang=Math.atan2(z,x)+dt*.025;
+     const rr=Math.sqrt(x*x+z*z);
+     a[i*3]=Math.cos(ang)*rr;
+     a[i*3+2]=Math.sin(ang)*rr;
+   }
+   pg.geometry.attributes.position.needsUpdate=true;
+ }
+ controls.update();
+ renderer.render(scene,camera);
+}
+animate();
+
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+
+document.getElementById("pause").onclick=()=>{
+ paused=!paused;
+ document.getElementById("pause").textContent=paused?"PLAY":"PAUSE";
+};
+document.getElementById("fs").onclick=()=>{
+ if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+ else document.exitFullscreen();
+};
+</script>
+</body>
+</html>
+'''
+
+path = Path("/mnt/data/index.html")
+path.write_text(html, encoding="utf-8")
+print(f"Created: {path}")
+
